@@ -137,6 +137,9 @@ class Watcher(object):
       found in the configuration file for instance, are passed
       in this mapping -- this can be used by plugins for watcher-specific
       options.
+
+    - **respawn** -- If set to False, the processes handled by a watcher will
+      not be respawned automatically. (default: True)
     """
     def __init__(self, name, cmd, args=None, numprocesses=1, warmup_delay=0.,
                  working_dir=None, shell=False, uid=None, max_retry=5,
@@ -146,8 +149,7 @@ class Watcher(object):
                  stderr_stream=None, stream_backend='thread', priority=0,
                  singleton=False, use_sockets=False, copy_env=False,
                  copy_path=False, max_age=0, max_age_variance=30,
-                 hooks=None,
-                 **options):
+                 hooks=None, respawn=True, **options):
         self.name = name
         self.use_sockets = use_sockets
         self.res_name = name.lower().replace(" ", "_")
@@ -176,6 +178,7 @@ class Watcher(object):
         self.max_age_variance = int(max_age_variance)
         self.ignore_hook_failure = ['before_stop', 'after_stop']
         self.hooks = self._resolve_hooks(hooks)
+        self.respawn = respawn
 
         if singleton and self.numprocesses not in (0, 1):
             raise ValueError("Cannot have %d processes with a singleton "
@@ -343,8 +346,12 @@ class Watcher(object):
             self.reap_process(pid)
 
     @util.debuglog
-    def manage_processes(self):
-        """ manage processes
+    def manage_processes(self, respawn=False):
+        """ manage processes.
+
+        :param respawn:
+            Spawn processes regardless of self.respawn
+
         """
         if self.stopped:
             return
@@ -359,8 +366,9 @@ class Watcher(object):
                                        "time": time.time()})
                     self.kill_process(process)
 
-        if len(self.processes) < self.numprocesses:
-            self.spawn_processes()
+        if self.respawn or respawn:
+            if len(self.processes) < self.numprocesses:
+                self.spawn_processes()
 
         processes = self.processes.values()
         processes.sort()
@@ -373,13 +381,17 @@ class Watcher(object):
                 self.kill_process(process)
 
     @util.debuglog
-    def reap_and_manage_processes(self):
+    def reap_and_manage_processes(self, respawn=False):
         """Reap & manage processes.
+
+        :param respawn:
+            Spawn processes regardless of self.respawn
+
         """
         if self.stopped:
             return
         self.reap_processes()
-        self.manage_processes()
+        self.manage_processes(respawn=respawn)
 
     @util.debuglog
     def spawn_processes(self):
@@ -533,7 +545,7 @@ class Watcher(object):
 
     @util.debuglog
     def info(self):
-        return dict([(proc.pid, proc.info())\
+        return dict([(proc.pid, proc.info())
                      for proc in self.processes.values()])
 
     @util.debuglog
@@ -624,7 +636,7 @@ class Watcher(object):
 
         self._create_redirectors()
         self.reap_processes()
-        self.manage_processes()
+        self.manage_processes(respawn=True)
 
         if not self.call_hook('after_start'):
             logger.debug('Aborting startup')
